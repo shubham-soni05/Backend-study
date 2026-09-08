@@ -14,7 +14,7 @@ export async function register(req, res) {
     })
 
     if(isAlreadyRegisted){
-        res.status(409).json({
+        return res.status(409).json({
             message : "Username or Email already Exist"
         })
     }
@@ -27,12 +27,15 @@ export async function register(req, res) {
         password : hashedPassword
     })
 
-    const token = jwt.sign({
-        id : user._id},
-        config.JWT_SECRET,{
-            expiresIn : "1d"
-        }
-    )
+    const AccessToken = jwt.sign({id : user._id}, config.JWT_SECRET,{ expiresIn : "10m"})
+    const refreshToken = jwt.sign({id : user._id}, config.JWT_SECRET,{ expiresIn : "1d"})
+
+    res.cookie("refreshToken", refreshToken, {
+        httpOnly: true,      // client-side JS cannot read this cookie
+        secure: true,        // only sent over HTTPS
+        sameSite: "strict",  // CSRF protection
+        maxAge: 1 * 24 * 60 * 60 * 1000,  // 7 days in ms
+    });
 
     res.status(201).json({
         message : "User Registerd",
@@ -40,24 +43,24 @@ export async function register(req, res) {
             username : user.username,
             email : user.email,
         },
-        token
+        AccessToken
     })
 }
 
 export async function getme(req, res) {
     try{
-    const token = req.headers.authorization?.split(" ")[1];
+    const AccessToken = req.headers.authorization?.split(" ")[1];
 
-    if(!token){
+    if(!AccessToken){
         return res.status(401).json(
             {
-                message : "token not present"
+                message : "AccessToken not present"
             }
         )
     }
 
-    // const decode = jwt.verify(token, config.JWT_SECRET);
-    const {id, iat, exp} = jwt.verify(token, config.JWT_SECRET);
+    // const decode = jwt.verify(AccessToken, config.JWT_SECRET);
+    const {id, iat, exp} = jwt.verify(AccessToken, config.JWT_SECRET);
 
     const user = await usermodel.findById(id);
 
@@ -70,5 +73,26 @@ export async function getme(req, res) {
     });
     }
     catch(err){
-    return res.status(401).json({ message : "invalid or expired token", error: err.message});
+        return res.status(401).json({ message : "invalid or expired AccessToken", error: err.message});
 }} 
+
+export async function refreshToken(req, res) {
+    try {
+        const refreshToken = req.cookies.refreshToken;
+
+        if (!refreshToken) {
+            return res.status(401).json({ message: "Unauthorized access" });
+        }
+
+        const { id } = jwt.verify(refreshToken, config.JWT_SECRET);
+
+        const AccessToken = jwt.sign({ id }, config.JWT_SECRET, { expiresIn: "10m" });
+
+        return res.status(200).json({
+            message: "AccessToken Created",
+            AccessToken,
+        });
+    } catch (err) {
+        return res.status(401).json({ message: "invalid or expired refresh token", error: err.message });
+    }
+}
