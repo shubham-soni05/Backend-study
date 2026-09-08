@@ -1,4 +1,5 @@
 import usermodel from "../models/user.model.js"
+import sessionModel from "../models/session.model.js";
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import config from "../config/config.js";
@@ -27,14 +28,25 @@ export async function register(req, res) {
         password : hashedPassword
     })
 
-    const AccessToken = jwt.sign({id : user._id}, config.JWT_SECRET,{ expiresIn : "10m"})
+    // const AccessToken = jwt.sign({id : user._id}, config.JWT_SECRET,{ expiresIn : "10m"})
     const refreshToken = jwt.sign({id : user._id}, config.JWT_SECRET,{ expiresIn : "1d"})
+
+    const refreshTokenHash = crypto.createHash("sha256").update(refreshToken).digest("hex");
+
+    const session = await sessionModel.create({
+        user : user._id,
+        refreshTokenHash,
+        ip : req.ip,
+        userAgent : req.headers["user-agent"],
+    });
+
+    const AccessToken = jwt.sign({id : user._id, sessionId : session._id}, config.JWT_SECRET, { expiresIn : "10m"}) //adding the session id , so we can reference the token through sessionId.
 
     res.cookie("refreshToken", refreshToken, {
         httpOnly: true,      // client-side JS cannot read this cookie
         secure: true,        // only sent over HTTPS
         sameSite: "strict",  // CSRF protection
-        maxAge: 1 * 24 * 60 * 60 * 1000,  // 7 days in ms
+        maxAge: 1 * 24 * 60 * 60 * 1000, 
     });
 
     res.status(201).json({
@@ -84,6 +96,15 @@ export async function refreshToken(req, res) {
             return res.status(401).json({ message: "Unauthorized access" });
         }
 
+        const refreshTokenHash = crypto.createHash("sha256").update(refreshToken).digest("hex");
+
+        const session = await sessionModel.findOne({
+            refreshTokenHash, 
+            revoked : false, // find session which is not expired
+        })
+
+        if(!session) return res.status(401).json({message : "Invalid Refresh Toekn"});
+
         const { id } = jwt.verify(refreshToken, config.JWT_SECRET);
 
         const AccessToken = jwt.sign({ id }, config.JWT_SECRET, { expiresIn: "10m" });
@@ -94,5 +115,30 @@ export async function refreshToken(req, res) {
         });
     } catch (err) {
         return res.status(401).json({ message: "invalid or expired refresh token", error: err.message });
+    }
+}
+
+export async function logout(req,res) {
+    try {
+        const refreshToken = req.cookies.refreshToken;
+        if(!refreshToken) return res.status(400).json({message : "refresh token not found in cookie"});
+
+        const refreshTokenHash = crypto.createHash("sha256").update(refreshToken).digest("hex");
+
+        const session = await sessionModel.findOne({
+            refreshTokenHash,
+            revoked : false,
+        });
+
+        if(!session) return res.status(400).json({message : "No session Present"});
+
+        session.revoked = true;
+        await session.save();
+
+        res.clearCookie("refreshToken");
+
+        return res.status(200).json({message : "user logged out"});
+    } catch (err) {
+        return res.status(500).json({ message : "Something went wrong", error: err.message });
     }
 }
