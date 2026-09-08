@@ -42,6 +42,33 @@ export async function register(req, res) {
         },
         token
     })
-
-
 }
+
+export async function getme(req, res) {
+    try{
+    const token = req.headers.authorization?.split(" ")[1];
+
+    if(!token){
+        return res.status(401).json(
+            {
+                message : "token not present"
+            }
+        )
+    }
+
+    // const decode = jwt.verify(token, config.JWT_SECRET);
+    const {id, iat, exp} = jwt.verify(token, config.JWT_SECRET);
+
+    const user = await usermodel.findById(id);
+
+    if(!user) return res.status(404).json({ message : "user not found"});
+
+    return res.status(200).json({
+        username : user.username,
+        email : user.email,
+        message : "User Details Fetched" 
+    });
+    }
+    catch(err){
+    return res.status(401).json({ message : "invalid or expired token", error: err.message});
+}} 
