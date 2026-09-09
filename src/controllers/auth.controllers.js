@@ -142,3 +142,26 @@ export async function logout(req,res) {
         return res.status(500).json({ message : "Something went wrong", error: err.message });
     }
 }
+
+export async function logoutall(req, res) {
+    try {
+        const refreshToken = req.cookies.refreshToken;
+
+        if(!refreshToken) return res.status(400).json({message : "Refresh_token not present"});
+
+        const {id} = jwt.verify(refreshToken, config.JWT_SECRET);
+
+        await sessionModel.updateMany(
+            {user : id, revoked : false},
+            { revoked : true }
+        );
+
+        res.clearCookie("refreshToken");
+
+        return res.status(200).json({
+            message : "user logged out successfully"
+        });
+    } catch (err) {
+        return res.status(401).json({ message : "invalid or expired refresh token", error: err.message });
+    }
+}
